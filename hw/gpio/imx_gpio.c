@@ -277,7 +277,7 @@ static const VMStateDescription vmstate_imx_gpio = {
     .name = TYPE_IMX_GPIO,
     .version_id = 1,
     .minimum_version_id = 1,
-    .fields = (VMStateField[]) {
+    .fields = (const VMStateField[]) {
         VMSTATE_UINT32(dr, IMXGPIOState),
         VMSTATE_UINT32(gdir, IMXGPIOState),
         VMSTATE_UINT32(psr, IMXGPIOState),
@@ -290,11 +290,10 @@ static const VMStateDescription vmstate_imx_gpio = {
     }
 };
 
-static Property imx_gpio_properties[] = {
+static const Property imx_gpio_properties[] = {
     DEFINE_PROP_BOOL("has-edge-sel", IMXGPIOState, has_edge_sel, true),
     DEFINE_PROP_BOOL("has-upper-pin-irq", IMXGPIOState, has_upper_pin_irq,
                      false),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void imx_gpio_reset(DeviceState *dev)
@@ -333,7 +332,7 @@ static void imx_gpio_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = imx_gpio_realize;
-    dc->reset = imx_gpio_reset;
+    device_class_set_legacy_reset(dc, imx_gpio_reset);
     device_class_set_props(dc, imx_gpio_properties);
     dc->vmsd = &vmstate_imx_gpio;
     dc->desc = "i.MX GPIO controller";

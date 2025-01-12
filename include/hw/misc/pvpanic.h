@@ -15,7 +15,14 @@
 #ifndef HW_MISC_PVPANIC_H
 #define HW_MISC_PVPANIC_H
 
+#include "exec/memory.h"
 #include "qom/object.h"
+
+#include "standard-headers/misc/pvpanic.h"
+
+#define PVPANIC_EVENTS (PVPANIC_PANICKED | \
+                        PVPANIC_CRASH_LOADED | \
+                        PVPANIC_SHUTDOWN)
 
 #define TYPE_PVPANIC_ISA_DEVICE "pvpanic"
 #define TYPE_PVPANIC_PCI_DEVICE "pvpanic-pci"
@@ -32,14 +39,5 @@ struct PVPanicState {
 };
 
 void pvpanic_setup_io(PVPanicState *s, DeviceState *dev, unsigned size);
-
-static inline uint16_t pvpanic_port(void)
-{
-    Object *o = object_resolve_path_type("", TYPE_PVPANIC_ISA_DEVICE, NULL);
-    if (!o) {
-        return 0;
-    }
-    return object_property_get_uint(o, PVPANIC_IOPORT_PROP, NULL);
-}
 
 #endif

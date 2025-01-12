@@ -9,7 +9,7 @@
 
 #include "qemu/osdep.h"
 
-#include "libqos/libqtest.h"
+#include "libqtest.h"
 
 /*
  * This used to trigger the assert in scsi_dma_complete
@@ -40,7 +40,7 @@ static void test_lp1878263_megasas_zero_iov_cnt(void)
  */
 static void test_gitlab_issue521_megasas_sgl_ovf(void)
 {
-    QTestState *s = qtest_init("-display none -m 32M -machine q35 "
+    QTestState *s = qtest_init("-m 32M -machine q35 "
                                "-nodefaults -device megasas "
                                "-device scsi-cd,drive=null0 "
                                "-blockdev "

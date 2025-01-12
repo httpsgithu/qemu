@@ -1,8 +1,8 @@
-#ifndef QEMU_COMMON_H
-#define QEMU_COMMON_H
+#ifndef QEMU_HELP_TEXTS_H
+#define QEMU_HELP_TEXTS_H
 
 /* Copyright string for -version arguments, About dialogs, etc */
-#define QEMU_COPYRIGHT "Copyright (c) 2003-2022 " \
+#define QEMU_COPYRIGHT "Copyright (c) 2003-2025 " \
     "Fabrice Bellard and the QEMU Project developers"
 
 /* Bug reporting information for --help arguments, About dialogs, etc */

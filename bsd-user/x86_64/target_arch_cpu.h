@@ -16,8 +16,8 @@
  *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _TARGET_ARCH_CPU_H_
-#define _TARGET_ARCH_CPU_H_
+#ifndef TARGET_ARCH_CPU_H
+#define TARGET_ARCH_CPU_H
 
 #include "target_arch.h"
 #include "signal-common.h"
@@ -110,7 +110,7 @@ static inline void target_cpu_init(CPUX86State *env,
     cpu_x86_load_seg(env, R_GS, 0);
 }
 
-static inline void target_cpu_loop(CPUX86State *env)
+static inline G_NORETURN void target_cpu_loop(CPUX86State *env)
 {
     CPUState *cs = env_cpu(env);
     int trapnr;
@@ -174,4 +174,4 @@ static inline void target_cpu_reset(CPUArchState *env)
     cpu_reset(env_cpu(env));
 }
 
-#endif /* ! _TARGET_ARCH_CPU_H_ */
+#endif /* TARGET_ARCH_CPU_H */
