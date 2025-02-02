@@ -27,9 +27,10 @@
 #include "qapi/error.h"
 #include "hw/qdev-properties.h"
 #include "hw/arm/fsl-imx25.h"
+#include "hw/arm/boot.h"
 #include "hw/boards.h"
 #include "qemu/error-report.h"
-#include "sysemu/qtest.h"
+#include "system/qtest.h"
 #include "hw/i2c/i2c.h"
 #include "qemu/cutils.h"
 

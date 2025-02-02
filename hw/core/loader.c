@@ -35,7 +35,7 @@
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License along
@@ -44,6 +44,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/datadir.h"
+#include "qemu/error-report.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-machine.h"
 #include "qapi/type-helpers.h"
@@ -52,15 +53,16 @@
 #include "disas/disas.h"
 #include "migration/vmstate.h"
 #include "monitor/monitor.h"
-#include "sysemu/reset.h"
-#include "sysemu/sysemu.h"
+#include "system/reset.h"
+#include "system/system.h"
 #include "uboot_image.h"
 #include "hw/loader.h"
 #include "hw/nvram/fw_cfg.h"
 #include "exec/memory.h"
 #include "hw/boards.h"
 #include "qemu/cutils.h"
-#include "sysemu/runstate.h"
+#include "system/runstate.h"
+#include "tcg/debuginfo.h"
 
 #include <zlib.h>
 
@@ -114,17 +116,17 @@ ssize_t read_targphys(const char *name,
     return did;
 }
 
-int load_image_targphys(const char *filename,
-                        hwaddr addr, uint64_t max_sz)
+ssize_t load_image_targphys(const char *filename,
+                            hwaddr addr, uint64_t max_sz)
 {
     return load_image_targphys_as(filename, addr, max_sz, NULL);
 }
 
 /* return the size or -1 if error */
-int load_image_targphys_as(const char *filename,
-                           hwaddr addr, uint64_t max_sz, AddressSpace *as)
+ssize_t load_image_targphys_as(const char *filename,
+                               hwaddr addr, uint64_t max_sz, AddressSpace *as)
 {
-    int size;
+    ssize_t size;
 
     size = get_image_size(filename);
     if (size < 0 || size > max_sz) {
@@ -138,9 +140,9 @@ int load_image_targphys_as(const char *filename,
     return size;
 }
 
-int load_image_mr(const char *filename, MemoryRegion *mr)
+ssize_t load_image_mr(const char *filename, MemoryRegion *mr)
 {
-    int size;
+    ssize_t size;
 
     if (!memory_access_is_direct(mr, false)) {
         /* Can only load an image into RAM or ROM */
@@ -209,8 +211,8 @@ static void bswap_ahdr(struct exec *e)
 #define ZMAGIC 0413
 #define QMAGIC 0314
 #define _N_HDROFF(x) (1024 - sizeof (struct exec))
-#define N_TXTOFF(x)							\
-    (N_MAGIC(x) == ZMAGIC ? _N_HDROFF((x)) + sizeof (struct exec) :	\
+#define N_TXTOFF(x)                                                 \
+    (N_MAGIC(x) == ZMAGIC ? _N_HDROFF((x)) + sizeof (struct exec) : \
      (N_MAGIC(x) == QMAGIC ? 0 : sizeof (struct exec)))
 #define N_TXTADDR(x, target_page_size) (N_MAGIC(x) == QMAGIC ? target_page_size : 0)
 #define _N_SEGMENT_ROUND(x, target_page_size) (((x) + target_page_size - 1) & ~(target_page_size - 1))
@@ -222,8 +224,8 @@ static void bswap_ahdr(struct exec *e)
      : (_N_SEGMENT_ROUND (_N_TXTENDADDR(x, target_page_size), target_page_size)))
 
 
-int load_aout(const char *filename, hwaddr addr, int max_sz,
-              int bswap_needed, hwaddr target_page_size)
+ssize_t load_aout(const char *filename, hwaddr addr, int max_sz,
+                  int bswap_needed, hwaddr target_page_size)
 {
     int fd;
     ssize_t size, ret;
@@ -299,11 +301,11 @@ static void *load_at(int fd, off_t offset, size_t size)
 #define ELF_CLASS   ELFCLASS32
 #include "elf.h"
 
-#define SZ		32
+#define SZ              32
 #define elf_word        uint32_t
-#define elf_sword        int32_t
-#define bswapSZs	bswap32s
-#include "hw/elf_ops.h"
+#define elf_sword       int32_t
+#define bswapSZs        bswap32s
+#include "hw/elf_ops.h.inc"
 
 #undef elfhdr
 #undef elf_phdr
@@ -315,17 +317,17 @@ static void *load_at(int fd, off_t offset, size_t size)
 #undef elf_sword
 #undef bswapSZs
 #undef SZ
-#define elfhdr		elf64_hdr
-#define elf_phdr	elf64_phdr
-#define elf_note	elf64_note
-#define elf_shdr	elf64_shdr
-#define elf_sym		elf64_sym
+#define elfhdr          elf64_hdr
+#define elf_phdr        elf64_phdr
+#define elf_note        elf64_note
+#define elf_shdr        elf64_shdr
+#define elf_sym         elf64_sym
 #define elf_rela        elf64_rela
 #define elf_word        uint64_t
-#define elf_sword        int64_t
-#define bswapSZs	bswap64s
-#define SZ		64
-#include "hw/elf_ops.h"
+#define elf_sword       int64_t
+#define bswapSZs        bswap64s
+#define SZ              64
+#include "hw/elf_ops.h.inc"
 
 const char *load_elf_strerror(ssize_t error)
 {
@@ -407,11 +409,11 @@ ssize_t load_elf(const char *filename,
                  uint64_t (*elf_note_fn)(void *, void *, bool),
                  uint64_t (*translate_fn)(void *, uint64_t),
                  void *translate_opaque, uint64_t *pentry, uint64_t *lowaddr,
-                 uint64_t *highaddr, uint32_t *pflags, int big_endian,
+                 uint64_t *highaddr, uint32_t *pflags, int elf_data_order,
                  int elf_machine, int clear_lsb, int data_swab)
 {
     return load_elf_as(filename, elf_note_fn, translate_fn, translate_opaque,
-                       pentry, lowaddr, highaddr, pflags, big_endian,
+                       pentry, lowaddr, highaddr, pflags, elf_data_order,
                        elf_machine, clear_lsb, data_swab, NULL);
 }
 
@@ -420,29 +422,15 @@ ssize_t load_elf_as(const char *filename,
                     uint64_t (*elf_note_fn)(void *, void *, bool),
                     uint64_t (*translate_fn)(void *, uint64_t),
                     void *translate_opaque, uint64_t *pentry, uint64_t *lowaddr,
-                    uint64_t *highaddr, uint32_t *pflags, int big_endian,
+                    uint64_t *highaddr, uint32_t *pflags, int elf_data_order,
                     int elf_machine, int clear_lsb, int data_swab,
                     AddressSpace *as)
 {
-    return load_elf_ram(filename, elf_note_fn, translate_fn, translate_opaque,
-                        pentry, lowaddr, highaddr, pflags, big_endian,
-                        elf_machine, clear_lsb, data_swab, as, true);
-}
-
-/* return < 0 if error, otherwise the number of bytes loaded in memory */
-ssize_t load_elf_ram(const char *filename,
-                     uint64_t (*elf_note_fn)(void *, void *, bool),
-                     uint64_t (*translate_fn)(void *, uint64_t),
-                     void *translate_opaque, uint64_t *pentry,
-                     uint64_t *lowaddr, uint64_t *highaddr, uint32_t *pflags,
-                     int big_endian, int elf_machine, int clear_lsb,
-                     int data_swab, AddressSpace *as, bool load_rom)
-{
     return load_elf_ram_sym(filename, elf_note_fn,
                             translate_fn, translate_opaque,
-                            pentry, lowaddr, highaddr, pflags, big_endian,
+                            pentry, lowaddr, highaddr, pflags, elf_data_order,
                             elf_machine, clear_lsb, data_swab, as,
-                            load_rom, NULL);
+                            true, NULL);
 }
 
 /* return < 0 if error, otherwise the number of bytes loaded in memory */
@@ -451,11 +439,12 @@ ssize_t load_elf_ram_sym(const char *filename,
                          uint64_t (*translate_fn)(void *, uint64_t),
                          void *translate_opaque, uint64_t *pentry,
                          uint64_t *lowaddr, uint64_t *highaddr,
-                         uint32_t *pflags, int big_endian, int elf_machine,
+                         uint32_t *pflags, int elf_data_order, int elf_machine,
                          int clear_lsb, int data_swab,
                          AddressSpace *as, bool load_rom, symbol_fn_t sym_cb)
 {
-    int fd, data_order, target_data_order, must_swab;
+    const int host_data_order = HOST_BIG_ENDIAN ? ELFDATA2MSB : ELFDATA2LSB;
+    int fd, must_swab;
     ssize_t ret = ELF_LOAD_FAILED;
     uint8_t e_ident[EI_NIDENT];
 
@@ -473,22 +462,13 @@ ssize_t load_elf_ram_sym(const char *filename,
         ret = ELF_LOAD_NOT_ELF;
         goto fail;
     }
-#if HOST_BIG_ENDIAN
-    data_order = ELFDATA2MSB;
-#else
-    data_order = ELFDATA2LSB;
-#endif
-    must_swab = data_order != e_ident[EI_DATA];
-    if (big_endian) {
-        target_data_order = ELFDATA2MSB;
-    } else {
-        target_data_order = ELFDATA2LSB;
-    }
 
-    if (target_data_order != e_ident[EI_DATA]) {
+    if (elf_data_order != ELFDATANONE && elf_data_order != e_ident[EI_DATA]) {
         ret = ELF_LOAD_WRONG_ENDIAN;
         goto fail;
     }
+
+    must_swab = host_data_order != e_ident[EI_DATA];
 
     lseek(fd, 0, SEEK_SET);
     if (e_ident[EI_CLASS] == ELFCLASS64) {
@@ -501,6 +481,10 @@ ssize_t load_elf_ram_sym(const char *filename,
                          translate_fn, translate_opaque, must_swab,
                          pentry, lowaddr, highaddr, pflags, elf_machine,
                          clear_lsb, data_swab, as, load_rom, sym_cb);
+    }
+
+    if (ret > 0) {
+        debuginfo_report_elf(filename, fd, 0);
     }
 
  fail:
@@ -522,7 +506,7 @@ static void bswap_uboot_header(uboot_image_header_t *hdr)
 }
 
 
-#define ZALLOC_ALIGNMENT	16
+#define ZALLOC_ALIGNMENT    16
 
 static void *zalloc(void *x, unsigned items, unsigned size)
 {
@@ -542,17 +526,17 @@ static void zfree(void *x, void *addr)
 }
 
 
-#define HEAD_CRC	2
-#define EXTRA_FIELD	4
-#define ORIG_NAME	8
-#define COMMENT		0x10
-#define RESERVED	0xe0
+#define HEAD_CRC    2
+#define EXTRA_FIELD 4
+#define ORIG_NAME   8
+#define COMMENT     0x10
+#define RESERVED    0xe0
 
-#define DEFLATED	8
+#define DEFLATED    8
 
 ssize_t gunzip(void *dst, size_t dstlen, uint8_t *src, size_t srclen)
 {
-    z_stream s;
+    z_stream s = {};
     ssize_t dstbytes;
     int r, i, flags;
 
@@ -604,6 +588,7 @@ ssize_t gunzip(void *dst, size_t dstlen, uint8_t *src, size_t srclen)
     r = inflate(&s, Z_FINISH);
     if (r != Z_OK && r != Z_STREAM_END) {
         printf ("Error: inflate() returned %d\n", r);
+        inflateEnd(&s);
         return -1;
     }
     dstbytes = s.next_out - (unsigned char *) dst;
@@ -617,13 +602,14 @@ toosmall:
 }
 
 /* Load a U-Boot image.  */
-static int load_uboot_image(const char *filename, hwaddr *ep, hwaddr *loadaddr,
-                            int *is_linux, uint8_t image_type,
-                            uint64_t (*translate_fn)(void *, uint64_t),
-                            void *translate_opaque, AddressSpace *as)
+static ssize_t load_uboot_image(const char *filename, hwaddr *ep,
+                                hwaddr *loadaddr, int *is_linux,
+                                uint8_t image_type,
+                                uint64_t (*translate_fn)(void *, uint64_t),
+                                void *translate_opaque, AddressSpace *as)
 {
     int fd;
-    int size;
+    ssize_t size;
     hwaddr address;
     uboot_image_header_t h;
     uboot_image_header_t *hdr = &h;
@@ -696,6 +682,21 @@ static int load_uboot_image(const char *filename, hwaddr *ep, hwaddr *loadaddr,
         if (is_linux) {
             if (hdr->ih_os == IH_OS_LINUX) {
                 *is_linux = 1;
+            } else if (hdr->ih_os == IH_OS_VXWORKS) {
+                /*
+                 * VxWorks 7 uses the same boot interface as the Linux kernel
+                 * on Arm (64-bit only), PowerPC and RISC-V architectures.
+                 */
+                switch (hdr->ih_arch) {
+                case IH_ARCH_ARM64:
+                case IH_ARCH_PPC:
+                case IH_ARCH_RISCV:
+                    *is_linux = 1;
+                    break;
+                default:
+                    *is_linux = 0;
+                    break;
+                }
             } else {
                 *is_linux = 0;
             }
@@ -745,40 +746,40 @@ out:
     return ret;
 }
 
-int load_uimage(const char *filename, hwaddr *ep, hwaddr *loadaddr,
-                int *is_linux,
-                uint64_t (*translate_fn)(void *, uint64_t),
-                void *translate_opaque)
+ssize_t load_uimage(const char *filename, hwaddr *ep, hwaddr *loadaddr,
+                    int *is_linux,
+                    uint64_t (*translate_fn)(void *, uint64_t),
+                    void *translate_opaque)
 {
     return load_uboot_image(filename, ep, loadaddr, is_linux, IH_TYPE_KERNEL,
                             translate_fn, translate_opaque, NULL);
 }
 
-int load_uimage_as(const char *filename, hwaddr *ep, hwaddr *loadaddr,
-                   int *is_linux,
-                   uint64_t (*translate_fn)(void *, uint64_t),
-                   void *translate_opaque, AddressSpace *as)
+ssize_t load_uimage_as(const char *filename, hwaddr *ep, hwaddr *loadaddr,
+                       int *is_linux,
+                       uint64_t (*translate_fn)(void *, uint64_t),
+                       void *translate_opaque, AddressSpace *as)
 {
     return load_uboot_image(filename, ep, loadaddr, is_linux, IH_TYPE_KERNEL,
                             translate_fn, translate_opaque, as);
 }
 
 /* Load a ramdisk.  */
-int load_ramdisk(const char *filename, hwaddr addr, uint64_t max_sz)
+ssize_t load_ramdisk(const char *filename, hwaddr addr, uint64_t max_sz)
 {
     return load_ramdisk_as(filename, addr, max_sz, NULL);
 }
 
-int load_ramdisk_as(const char *filename, hwaddr addr, uint64_t max_sz,
-                    AddressSpace *as)
+ssize_t load_ramdisk_as(const char *filename, hwaddr addr, uint64_t max_sz,
+                        AddressSpace *as)
 {
     return load_uboot_image(filename, NULL, &addr, NULL, IH_TYPE_RAMDISK,
                             NULL, NULL, as);
 }
 
 /* Load a gzip-compressed kernel to a dynamically allocated buffer. */
-int load_image_gzipped_buffer(const char *filename, uint64_t max_sz,
-                              uint8_t **buffer)
+ssize_t load_image_gzipped_buffer(const char *filename, uint64_t max_sz,
+                                  uint8_t **buffer)
 {
     uint8_t *compressed_data = NULL;
     uint8_t *data = NULL;
@@ -822,17 +823,95 @@ int load_image_gzipped_buffer(const char *filename, uint64_t max_sz,
     return ret;
 }
 
-/* Load a gzip-compressed kernel. */
-int load_image_gzipped(const char *filename, hwaddr addr, uint64_t max_sz)
-{
-    int bytes;
-    uint8_t *data;
 
-    bytes = load_image_gzipped_buffer(filename, max_sz, &data);
-    if (bytes != -1) {
-        rom_add_blob_fixed(filename, data, bytes, addr);
-        g_free(data);
+/* The PE/COFF MS-DOS stub magic number */
+#define EFI_PE_MSDOS_MAGIC        "MZ"
+
+/*
+ * The Linux header magic number for a EFI PE/COFF
+ * image targeting an unspecified architecture.
+ */
+#define EFI_PE_LINUX_MAGIC        "\xcd\x23\x82\x81"
+
+/*
+ * Bootable Linux kernel images may be packaged as EFI zboot images, which are
+ * self-decompressing executables when loaded via EFI. The compressed payload
+ * can also be extracted from the image and decompressed by a non-EFI loader.
+ *
+ * The de facto specification for this format is at the following URL:
+ *
+ * https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/drivers/firmware/efi/libstub/zboot-header.S
+ *
+ * This definition is based on Linux upstream commit 29636a5ce87beba.
+ */
+struct linux_efi_zboot_header {
+    uint8_t     msdos_magic[2];         /* PE/COFF 'MZ' magic number */
+    uint8_t     reserved0[2];
+    uint8_t     zimg[4];                /* "zimg" for Linux EFI zboot images */
+    uint32_t    payload_offset;         /* LE offset to compressed payload */
+    uint32_t    payload_size;           /* LE size of the compressed payload */
+    uint8_t     reserved1[8];
+    char        compression_type[32];   /* Compression type, NUL terminated */
+    uint8_t     linux_magic[4];         /* Linux header magic */
+    uint32_t    pe_header_offset;       /* LE offset to the PE header */
+};
+
+/*
+ * Check whether *buffer points to a Linux EFI zboot image in memory.
+ *
+ * If it does, attempt to decompress it to a new buffer, and free the old one.
+ * If any of this fails, return an error to the caller.
+ *
+ * If the image is not a Linux EFI zboot image, do nothing and return success.
+ */
+ssize_t unpack_efi_zboot_image(uint8_t **buffer, ssize_t *size)
+{
+    const struct linux_efi_zboot_header *header;
+    uint8_t *data = NULL;
+    ssize_t ploff, plsize;
+    ssize_t bytes;
+
+    /* ignore if this is too small to be a EFI zboot image */
+    if (*size < sizeof(*header)) {
+        return 0;
     }
+
+    header = (struct linux_efi_zboot_header *)*buffer;
+
+    /* ignore if this is not a Linux EFI zboot image */
+    if (memcmp(&header->msdos_magic, EFI_PE_MSDOS_MAGIC, 2) != 0 ||
+        memcmp(&header->zimg, "zimg", 4) != 0 ||
+        memcmp(&header->linux_magic, EFI_PE_LINUX_MAGIC, 4) != 0) {
+        return 0;
+    }
+
+    if (strcmp(header->compression_type, "gzip") != 0) {
+        fprintf(stderr,
+                "unable to handle EFI zboot image with \"%.*s\" compression\n",
+                (int)sizeof(header->compression_type) - 1,
+                header->compression_type);
+        return -1;
+    }
+
+    ploff = ldl_le_p(&header->payload_offset);
+    plsize = ldl_le_p(&header->payload_size);
+
+    if (ploff < 0 || plsize < 0 || ploff + plsize > *size) {
+        fprintf(stderr, "unable to handle corrupt EFI zboot image\n");
+        return -1;
+    }
+
+    data = g_malloc(LOAD_IMAGE_MAX_GUNZIP_BYTES);
+    bytes = gunzip(data, LOAD_IMAGE_MAX_GUNZIP_BYTES, *buffer + ploff, plsize);
+    if (bytes < 0) {
+        fprintf(stderr, "failed to decompress EFI zboot image\n");
+        g_free(data);
+        return -1;
+    }
+
+    g_free(*buffer);
+    *buffer = g_realloc(data, bytes);
+    *size = bytes;
     return bytes;
 }
 
@@ -955,14 +1034,15 @@ static void *rom_set_mr(Rom *rom, Object *owner, const char *name, bool ro)
     return data;
 }
 
-int rom_add_file(const char *file, const char *fw_dir,
-                 hwaddr addr, int32_t bootindex,
-                 bool option_rom, MemoryRegion *mr,
-                 AddressSpace *as)
+ssize_t rom_add_file(const char *file, const char *fw_dir,
+                     hwaddr addr, int32_t bootindex,
+                     bool has_option_rom, MemoryRegion *mr,
+                     AddressSpace *as)
 {
     MachineClass *mc = MACHINE_GET_CLASS(qdev_get_machine());
     Rom *rom;
-    int rc, fd = -1;
+    gsize size;
+    g_autoptr(GError) gerr = NULL;
     char devpath[100];
 
     if (as && mr) {
@@ -980,10 +1060,10 @@ int rom_add_file(const char *file, const char *fw_dir,
         rom->path = g_strdup(file);
     }
 
-    fd = open(rom->path, O_RDONLY | O_BINARY);
-    if (fd == -1) {
-        fprintf(stderr, "Could not open option rom '%s': %s\n",
-                rom->path, strerror(errno));
+    if (!g_file_get_contents(rom->path, (gchar **) &rom->data,
+                             &size, &gerr)) {
+        fprintf(stderr, "rom: file %-20s: error %s\n",
+                rom->name, gerr->message);
         goto err;
     }
 
@@ -992,23 +1072,8 @@ int rom_add_file(const char *file, const char *fw_dir,
         rom->fw_file = g_strdup(file);
     }
     rom->addr     = addr;
-    rom->romsize  = lseek(fd, 0, SEEK_END);
-    if (rom->romsize == -1) {
-        fprintf(stderr, "rom: file %-20s: get size error: %s\n",
-                rom->name, strerror(errno));
-        goto err;
-    }
-
+    rom->romsize  = size;
     rom->datasize = rom->romsize;
-    rom->data     = g_malloc0(rom->datasize);
-    lseek(fd, 0, SEEK_SET);
-    rc = read(fd, rom->data, rom->datasize);
-    if (rc != rom->datasize) {
-        fprintf(stderr, "rom: file %-20s: read error: rc=%d (expected %zd)\n",
-                rom->name, rc, rom->datasize);
-        goto err;
-    }
-    close(fd);
     rom_insert(rom);
     if (rom->fw_file && fw_cfg) {
         const char *basename;
@@ -1025,7 +1090,7 @@ int rom_add_file(const char *file, const char *fw_dir,
                  basename);
         snprintf(devpath, sizeof(devpath), "/rom@%s", fw_file_name);
 
-        if ((!option_rom || mc->option_rom_has_mr) && mc->rom_file_has_mr) {
+        if ((!has_option_rom || mc->option_rom_has_mr) && mc->rom_file_has_mr) {
             data = rom_set_mr(rom, OBJECT(fw_cfg), devpath, true);
         } else {
             data = rom->data;
@@ -1037,7 +1102,7 @@ int rom_add_file(const char *file, const char *fw_dir,
             rom->mr = mr;
             snprintf(devpath, sizeof(devpath), "/rom@%s", file);
         } else {
-            snprintf(devpath, sizeof(devpath), "/rom@" TARGET_FMT_plx, addr);
+            snprintf(devpath, sizeof(devpath), "/rom@" HWADDR_FMT_plx, addr);
         }
     }
 
@@ -1045,9 +1110,6 @@ int rom_add_file(const char *file, const char *fw_dir,
     return 0;
 
 err:
-    if (fd != -1)
-        close(fd);
-
     rom_free(rom);
     return -1;
 }
@@ -1123,12 +1185,12 @@ int rom_add_elf_program(const char *name, GMappedFile *mapped_file, void *data,
     return 0;
 }
 
-int rom_add_vga(const char *file)
+ssize_t rom_add_vga(const char *file)
 {
     return rom_add_file(file, "vgaroms", 0, -1, true, NULL, NULL);
 }
 
-int rom_add_option(const char *file, int32_t bootindex)
+ssize_t rom_add_option(const char *file, int32_t bootindex)
 {
     return rom_add_file(file, "genroms", 0, bootindex, true, NULL, NULL);
 }
@@ -1221,10 +1283,10 @@ static void rom_print_one_overlap_error(Rom *last_rom, Rom *rom)
         "\nThe following two regions overlap (in the %s address space):\n",
         rom_as_name(rom));
     error_printf(
-        "  %s (addresses 0x" TARGET_FMT_plx " - 0x" TARGET_FMT_plx ")\n",
+        "  %s (addresses 0x" HWADDR_FMT_plx " - 0x" HWADDR_FMT_plx ")\n",
         last_rom->name, last_rom->addr, last_rom->addr + last_rom->romsize);
     error_printf(
-        "  %s (addresses 0x" TARGET_FMT_plx " - 0x" TARGET_FMT_plx ")\n",
+        "  %s (addresses 0x" HWADDR_FMT_plx " - 0x" HWADDR_FMT_plx ")\n",
         rom->name, rom->addr, rom->addr + rom->romsize);
 }
 
@@ -1378,7 +1440,7 @@ RomGap rom_find_largest_gap_between(hwaddr base, size_t size)
         if (rom->mr || rom->fw_file) {
             continue;
         }
-        /* ignore anything finishing bellow base */
+        /* ignore anything finishing below base */
         if (rom->addr + rom->romsize <= base) {
             continue;
         }
@@ -1578,7 +1640,7 @@ HumanReadableText *qmp_x_query_roms(Error **errp)
                                    rom->romsize,
                                    rom->name);
         } else if (!rom->fw_file) {
-            g_string_append_printf(buf, "addr=" TARGET_FMT_plx
+            g_string_append_printf(buf, "addr=" HWADDR_FMT_plx
                                    " size=0x%06zx mem=%s name=\"%s\"\n",
                                    rom->addr, rom->romsize,
                                    rom->isrom ? "rom" : "ram",
@@ -1831,11 +1893,12 @@ out:
 }
 
 /* return size or -1 if error */
-int load_targphys_hex_as(const char *filename, hwaddr *entry, AddressSpace *as)
+ssize_t load_targphys_hex_as(const char *filename, hwaddr *entry,
+                             AddressSpace *as)
 {
     gsize hex_blob_size;
     gchar *hex_blob;
-    int total_size = 0;
+    ssize_t total_size = 0;
 
     if (!g_file_get_contents(filename, &hex_blob, &hex_blob_size, NULL)) {
         return -1;
